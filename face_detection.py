@@ -535,6 +535,7 @@ def main():
     lock_error_msg = ""
     lock_error_timer = 0
     unknown_since = 0
+    last_activity_time = 0
     LOCK_DELAY = 1.5
 
     while True:
@@ -573,9 +574,18 @@ def main():
         if id_results:
             assign_identities(tracker, id_results)
 
-        has_known = identifier.has_known_face()
-        has_unknown = identifier.has_unknown_face()
         active_faces = tracker.get_active_faces()
+
+        # Déterminer l'état depuis le TRACKER (persistant, pas intermittent)
+        tracker_has_known = any(f.name is not None and f.name != "Inconnu" for f in active_faces)
+        tracker_has_unknown = any(f.name == "Inconnu" for f in active_faces)
+        # Aussi utiliser le thread comme backup
+        has_known_thread = identifier.has_known_face()
+        has_unknown_thread = identifier.has_unknown_face()
+        # Combiner : connu si tracker OU thread dit connu
+        has_known = tracker_has_known or has_known_thread
+        # Inconnu si tracker OU thread dit inconnu
+        has_unknown = tracker_has_unknown or has_unknown_thread
 
         # ══════════════════════════════════════════════════════════════════
         #  MODE VERROUILLÉ
@@ -629,13 +639,26 @@ def main():
             continue
 
         # ══════════════════════════════════════════════════════════════════
-        #  MODE NORMAL
+        #  MODE NORMAL — Logique de verrouillage
         # ══════════════════════════════════════════════════════════════════
 
-        if has_unknown and not has_known and db.count() > 0:
+        # Accumuler l'activité (ne pas la perdre)
+        if input_monitor.has_activity():
+            last_activity_time = time.time()
+
+        # Vérifier si verrouillage nécessaire
+        # Condition : inconnu présent ET aucun connu ET DB non vide
+        should_lock = has_unknown and not has_known and db.count() > 0
+
+        if should_lock:
             if unknown_since == 0:
                 unknown_since = time.time()
-            if time.time() - unknown_since > LOCK_DELAY and input_monitor.has_activity():
+
+            # Verrouiller si inconnu depuis LOCK_DELAY ET activité récente (< 2s)
+            unknown_duration = time.time() - unknown_since
+            recent_activity = (time.time() - last_activity_time) < 2.0
+
+            if unknown_duration > LOCK_DELAY and recent_activity:
                 is_locked = True
                 password_input = ""
                 unknown_since = 0
@@ -644,9 +667,9 @@ def main():
                 cv2.setWindowProperty(LOCK_WINDOW, cv2.WND_PROP_FULLSCREEN,
                                       cv2.WINDOW_FULLSCREEN)
                 continue
-        else:
+        elif has_known:
+            # Reset seulement si un visage connu est confirmé
             unknown_since = 0
-            input_monitor.has_activity()
 
         # ── Dessiner les visages trackés ──
         known_count = 0
