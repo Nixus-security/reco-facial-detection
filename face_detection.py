@@ -71,7 +71,7 @@ class IdentificationThread:
             try:
                 # Réduire pour accélérer l'encodage
                 small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-                rgb = small[:, :, ::-1].copy()
+                rgb = np.array(cv2.cvtColor(small, cv2.COLOR_BGR2RGB), dtype=np.uint8)
 
                 locations = face_recognition.face_locations(rgb, model="hog")
 
@@ -229,7 +229,7 @@ def capture_face_encoding(cap):
         if not ret:
             continue
         frame = cv2.flip(frame, 1)
-        rgb = frame[:, :, ::-1].copy()
+        rgb = np.array(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), dtype=np.uint8)
         locs = face_recognition.face_locations(rgb, model="hog")
         if len(locs) > 0:
             largest = max(locs, key=lambda l: (l[2] - l[0]) * (l[1] - l[3]))
