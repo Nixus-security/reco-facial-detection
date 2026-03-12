@@ -1,104 +1,166 @@
-# Face Detection & Recognition + Security Lock
+# Face Detection & Recognition — Security Lock System
 
-Système de détection et reconnaissance faciale en temps réel avec verrouillage automatique de sécurité.
+Système de détection et reconnaissance faciale en temps réel avec verrouillage automatique de sécurité. Si une personne non autorisée est détectée et tente d'utiliser le clavier ou la souris, l'écran se verrouille instantanément.
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.10-blue)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.8%2B-green)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10%2B-red)
 ![face_recognition](https://img.shields.io/badge/face__recognition-1.3%2B-orange)
 
 ---
 
 ## Fonctionnalités
 
-- Détection multi-visages en temps réel (Haar Cascade)
-- Reconnaissance faciale avec base de données locale (face_recognition)
-- Deux catégories : **Connu** (vert) / **Inconnu** (rouge)
-- **Verrouillage automatique** si une personne inconnue touche le clavier ou la souris
+- Détection de visages en temps réel avec **MediaPipe** (rapide et précise)
+- Reconnaissance faciale avec **face_recognition / dlib** (thread arrière-plan)
+- **Tracker** de visages pour un suivi fluide entre les frames (lissage des positions)
+- Deux catégories : **Connu** (cadre vert) / **Inconnu** (cadre rouge)
+- Base de données locale en JSON (enregistrement, suppression, listing)
+- **Verrouillage automatique** plein écran si un inconnu touche clavier ou souris
+- **Blocage total** : `explorer.exe` est stoppé pendant le verrouillage (Win+D, Alt+Tab, etc. désactivés)
 - **Déverrouillage** par visage autorisé ou mot de passe
-- Écran de verrouillage plein écran avec flux caméra intégré
-- Enregistrement / suppression de personnes en direct
-- HUD avec FPS, compteurs et statistiques
+- HUD avec FPS, compteurs, indicateur de sécurité et mode actif
+- Surveillance clavier/souris avec **pynput**
+
+---
+
+## Comment ça marche
+
+```
+                    ┌──────────────┐
+                    │   Webcam     │
+                    └──────┬───────┘
+                           │
+              ┌────────────▼────────────┐
+              │  MediaPipe (détection)   │  ← chaque frame (~2ms)
+              └────────────┬────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │  Tracker (lissage)       │  ← suivi fluide des visages
+              └────────────┬────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │  face_recognition        │  ← thread arrière-plan (1 frame sur 3)
+              │  (identification)        │
+              └────────────┬────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │  Connu (vert)            │
+              │  Inconnu (rouge)         │
+              └────────────┬────────────┘
+                           │
+          ┌────────────────▼────────────────┐
+          │  Inconnu + clavier/souris ?      │
+          │  → VERROUILLAGE PLEIN ÉCRAN      │
+          │  → explorer.exe stoppé           │
+          │  → Déverrouillage par visage     │
+          │    autorisé ou mot de passe      │
+          └─────────────────────────────────┘
+```
 
 ---
 
 ## Sécurité
 
-Le système surveille en permanence le clavier et la souris. Si **uniquement** des visages inconnus sont détectés et qu'une activité clavier/souris est détectée, l'écran se verrouille automatiquement.
+Le système surveille en permanence le clavier et la souris via `pynput`. Si **uniquement** des visages inconnus sont détectés et qu'une activité clavier/souris est détectée, l'écran se verrouille après ~1.5 seconde.
 
-**Déverrouillage possible par :**
-1. Présenter un visage enregistré devant la caméra
-2. Taper le mot de passe configuré au premier lancement
+**Pendant le verrouillage :**
+- `explorer.exe` est tué → plus de barre des tâches, Win+D, Alt+Tab
+- Écran plein écran avec flux caméra intégré
+- Fenêtre forcée en premier plan (TOPMOST)
+
+**Déverrouillage par :**
+1. Présenter un visage enregistré devant la caméra (automatique)
+2. Taper le mot de passe au clavier puis Entrée
+
+**Sécurités en cas de crash :**
+- `explorer.exe` est automatiquement relancé si le programme plante
+- `Ctrl+Alt+Suppr` reste toujours accessible (sécurité Windows)
 
 ---
 
 ## Prérequis
 
-- Python 3.10
+- Python 3.10 (Windows)
 - Une webcam fonctionnelle
-- CMake installé ([cmake.org](https://cmake.org/download/))
+- CMake installé ([cmake.org](https://cmake.org/download/) — cocher "Add to PATH")
+- Droits administrateur (nécessaire pour stopper explorer.exe)
 
 ---
 
 ## Installation
 
 ```bash
-git clone <url-du-repo>
-cd face-detection
+git clone https://github.com/Nixus-security/reco-facial-detection.git
+cd reco-facial-detection
 
 python -m venv .venv
 
-# Windows
+# Windows (PowerShell)
 .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
 
-> **Note :** numpy est fixé à 1.26.4 pour compatibilité avec dlib.
+> **Note :** `numpy` est fixé à 1.26.4 pour compatibilité avec dlib. L'installation de `dlib` peut prendre plusieurs minutes (compilation C++).
+
+Si `dlib` ne compile pas, utiliser la version précompilée :
+```bash
+pip install https://github.com/jloh02/dlib/releases/download/v19.22/dlib-19.22.99-cp310-cp310-win_amd64.whl
+pip install face-recognition
+```
 
 ---
 
 ## Utilisation
 
-```bash
+**Lancer en administrateur** (obligatoire pour le verrouillage) :
+
+```powershell
+# PowerShell en admin (clic droit → Exécuter en tant qu'administrateur)
+cd C:\chemin\vers\reco-facial-detection
 python face_detection.py
 ```
 
-Au premier lancement, le programme demande de configurer un mot de passe de déverrouillage.
+### Depuis WSL
+
+```bash
+pip.exe install -r requirements.txt
+# Lancer en admin via PowerShell
+powershell.exe -Command "Start-Process python.exe -ArgumentList 'face_detection.py' -Verb RunAs"
+```
+
+### Premier lancement
+
+Le programme demande de configurer un mot de passe de déverrouillage (minimum 4 caractères).
 
 ### Contrôles clavier
 
-| Touche      | Action                             |
-|-------------|-------------------------------------|
-| `R`         | Enregistrer un nouveau visage       |
-| `L`         | Lister les personnes enregistrées   |
-| `D`         | Supprimer une personne              |
-| `P`         | Changer le mot de passe             |
-| `Q` / `ESC` | Quitter                            |
+| Touche       | Action                              |
+|--------------|--------------------------------------|
+| `R`          | Enregistrer un nouveau visage        |
+| `L`          | Lister les personnes enregistrées    |
+| `D`          | Supprimer une personne de la base    |
+| `P`          | Changer le mot de passe              |
+| `Q` / `ESC`  | Quitter                             |
 
 ### Enregistrer un visage
 
 1. Appuyez sur `R`
 2. Tapez le nom dans le terminal
 3. Regardez la caméra
-4. Appuyez sur `ESPACE` pour capturer
-
-### Utilisation sous WSL
-
-```bash
-pip.exe install -r requirements.txt
-python.exe face_detection.py
-```
+4. Appuyez sur `ESPACE` pour capturer (5 photos moyennées)
 
 ---
 
 ## Structure du projet
 
 ```
-face-detection/
-├── face_detection.py    # Script principal
-├── database.py          # Module base de données + mot de passe
-├── face_database.json   # DB des visages (auto-généré)
-├── requirements.txt     # Dépendances
+reco-facial-detection/
+├── face_detection.py    # Script principal (détection, reconnaissance, verrouillage)
+├── database.py          # Module base de données (JSON + mot de passe hashé SHA-256)
+├── face_database.json   # Base de données des visages (auto-généré)
+├── requirements.txt     # Dépendances Python
 └── README.md
 ```
 
@@ -106,13 +168,51 @@ face-detection/
 
 ## Technologies
 
-- **OpenCV** — Capture vidéo, Haar Cascade, affichage
-- **face_recognition / dlib** — Encodage et reconnaissance faciale
-- **pynput** — Surveillance clavier et souris
-- **NumPy** — Manipulation de matrices
+| Composant | Rôle |
+|-----------|------|
+| **MediaPipe** | Détection de visages rapide (~2ms/frame) |
+| **face_recognition / dlib** | Encodage 128D et comparaison de visages |
+| **OpenCV** | Capture webcam, affichage, dessin |
+| **pynput** | Surveillance clavier et souris |
+| **ctypes** | API Windows (TOPMOST, force focus) |
+| **NumPy** | Manipulation de matrices et encodages |
+
+---
+
+## Dépendances
+
+```
+opencv-python>=4.8.0
+numpy==1.26.4
+face-recognition>=1.3.0
+dlib>=19.22.0
+pynput>=1.7.0
+mediapipe>=0.10.0
+```
+
+---
+
+## Limitations connues
+
+- `Ctrl+Alt+Suppr` ne peut pas être bloqué (sécurité Windows noyau)
+- Le Gestionnaire des tâches accessible via Ctrl+Alt+Suppr peut permettre de relancer explorer
+- Nécessite les droits administrateur pour le verrouillage complet
+- La reconnaissance faciale dépend de l'éclairage et de l'angle du visage
+- La webcam doit supporter au minimum 640x480
+
+---
+
+## Améliorations futures
+
+- Interface graphique (Tkinter / PyQt) pour l'enregistrement
+- Logs d'activité horodatés (qui a été détecté et quand)
+- Notifications par email en cas de détection d'un inconnu
+- Support multi-caméras
+- Export/import de la base de données
+- Mode "parano" : capture photo de l'intrus avant verrouillage
 
 ---
 
 ## Licence
 
-MIT
+MIT — Libre d'utilisation, de modification et de distribution.

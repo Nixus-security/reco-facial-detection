@@ -14,8 +14,78 @@ import sys
 import os
 import time
 import threading
+import ctypes
 from pynput import keyboard, mouse
 from database import FaceDatabase
+
+
+# ─── Windows API ─────────────────────────────────────────────────────────────
+user32 = ctypes.windll.user32
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+HWND_TOPMOST = -1
+SW_RESTORE = 9
+SW_SHOWMAXIMIZED = 3
+
+
+import subprocess
+
+
+def force_window_topmost(window_name):
+    """Force une fenêtre OpenCV à rester au premier plan (Windows)."""
+    hwnd = user32.FindWindowW(None, window_name)
+    if hwnd:
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.ShowWindow(hwnd, SW_SHOWMAXIMIZED)
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+        user32.SetForegroundWindow(hwnd)
+        return True
+    return False
+
+
+class ShellBlocker:
+    """
+    Bloque Win+D, Alt+Tab, etc. en tuant explorer.exe.
+    C'est la seule méthode fiable sans driver.
+    explorer.exe est relancé au déverrouillage.
+    """
+
+    def __init__(self):
+        self._blocked = False
+
+    def block(self):
+        """Tue explorer.exe pour bloquer tous les raccourcis shell."""
+        if not self._blocked:
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "explorer.exe"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._blocked = True
+                print("  [LOCK] Explorer stoppé")
+            except Exception as e:
+                print(f"  [WARN] Impossible de stopper explorer: {e}")
+
+    def unblock(self):
+        """Relance explorer.exe."""
+        if self._blocked:
+            try:
+                subprocess.Popen(
+                    ["explorer.exe"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._blocked = True  # sera reset après
+                print("  [LOCK] Explorer relancé")
+            except Exception as e:
+                print(f"  [WARN] Impossible de relancer explorer: {e}")
+            self._blocked = False
+
+    def stop(self):
+        """S'assure qu'explorer tourne en quittant."""
+        if self._blocked:
+            self.unblock()
 
 
 # ─── Couleurs ────────────────────────────────────────────────────────────────
@@ -520,6 +590,7 @@ def main():
     # ── Threads + Tracker ──
     identifier = IdentificationThread(db)
     input_monitor = InputMonitor()
+    shell_blocker = ShellBlocker()
     tracker = FaceTracker(max_distance=100, max_lost_frames=15)
 
     mode = "recognition"
@@ -576,22 +647,30 @@ def main():
 
         active_faces = tracker.get_active_faces()
 
-        # Déterminer l'état depuis le TRACKER (persistant, pas intermittent)
-        tracker_has_known = any(f.name is not None and f.name != "Inconnu" for f in active_faces)
-        tracker_has_unknown = any(f.name == "Inconnu" for f in active_faces)
-        # Aussi utiliser le thread comme backup
-        has_known_thread = identifier.has_known_face()
-        has_unknown_thread = identifier.has_unknown_face()
-        # Combiner : connu si tracker OU thread dit connu
-        has_known = tracker_has_known or has_known_thread
-        # Inconnu si tracker OU thread dit inconnu
-        has_unknown = tracker_has_unknown or has_unknown_thread
+        # Logique simple :
+        # - "connu" = au moins un visage identifié comme connu
+        # - "inconnu" = des visages sont présents mais aucun n'est connu
+        faces_present = len(active_faces) > 0
+        has_known = any(
+            f.name is not None and f.name != "Inconnu"
+            for f in active_faces
+        ) or identifier.has_known_face()
+
+        has_unknown = (faces_present and not has_known) or identifier.has_unknown_face()
 
         # ══════════════════════════════════════════════════════════════════
         #  MODE VERROUILLÉ
         # ══════════════════════════════════════════════════════════════════
         if is_locked:
             input_monitor.disable()
+
+            # ── Forcer la fenêtre au premier plan à chaque frame ──
+            # Recréer si fermée/minimisée
+            cv2.namedWindow(LOCK_WINDOW, cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty(LOCK_WINDOW, cv2.WND_PROP_FULLSCREEN,
+                                  cv2.WINDOW_FULLSCREEN)
+            # API Windows : TOPMOST + focus + restore si minimisé
+            force_window_topmost(LOCK_WINDOW)
 
             cam_display = frame.copy()
             for face in active_faces:
@@ -610,6 +689,7 @@ def main():
                 is_locked = False
                 password_input = ""
                 lock_error_msg = ""
+                shell_blocker.unblock()
                 cv2.destroyWindow(LOCK_WINDOW)
                 input_monitor.enable()
                 print("  ✓ Déverrouillé (visage) !")
@@ -617,11 +697,12 @@ def main():
                 continue
 
             key = cv2.waitKey(1) & 0xFF
-            if key == 13:
+            if key == 13:  # ENTER
                 if db.check_password(password_input):
                     is_locked = False
                     password_input = ""
                     lock_error_msg = ""
+                    shell_blocker.unblock()
                     cv2.destroyWindow(LOCK_WINDOW)
                     input_monitor.enable()
                     print("  ✓ Déverrouillé (MdP) !")
@@ -630,12 +711,11 @@ def main():
                     lock_error_msg = "Mot de passe incorrect !"
                     lock_error_timer = time.time()
                     password_input = ""
-            elif key == 8:
+            elif key == 8:  # BACKSPACE
                 password_input = password_input[:-1]
-            elif key == 27:
-                password_input = ""
-            elif 32 <= key <= 126:
+            elif 32 <= key <= 126 and key != 27:  # Caractère (ignore ESC)
                 password_input += chr(key)
+            # ESC, Q, Alt+F4 sont ignorés en mode verrouillé
             continue
 
         # ══════════════════════════════════════════════════════════════════
@@ -650,22 +730,34 @@ def main():
         # Condition : inconnu présent ET aucun connu ET DB non vide
         should_lock = has_unknown and not has_known and db.count() > 0
 
+        # Debug tous les 30 frames (~1s)
+        if frame_count % 30 == 0 and faces_present:
+            names = [f.name for f in active_faces]
+            age = time.time() - last_activity_time if last_activity_time > 0 else 999
+            print(f"  [DEBUG] faces={names} known={has_known} unknown={has_unknown} "
+                  f"should_lock={should_lock} activity={age:.1f}s ago "
+                  f"unknown_since={time.time() - unknown_since:.1f}s" if unknown_since > 0 else
+                  f"  [DEBUG] faces={names} known={has_known} unknown={has_unknown} "
+                  f"should_lock={should_lock} activity={age:.1f}s ago")
+
         if should_lock:
             if unknown_since == 0:
                 unknown_since = time.time()
 
-            # Verrouiller si inconnu depuis LOCK_DELAY ET activité récente (< 2s)
+            # Verrouiller si inconnu depuis LOCK_DELAY ET activité récente (< 3s)
             unknown_duration = time.time() - unknown_since
-            recent_activity = (time.time() - last_activity_time) < 2.0
+            recent_activity = last_activity_time > 0 and (time.time() - last_activity_time) < 3.0
 
             if unknown_duration > LOCK_DELAY and recent_activity:
                 is_locked = True
                 password_input = ""
                 unknown_since = 0
+                shell_blocker.block()
                 print("  ⚠ VERROUILLAGE !")
                 cv2.namedWindow(LOCK_WINDOW, cv2.WINDOW_NORMAL)
                 cv2.setWindowProperty(LOCK_WINDOW, cv2.WND_PROP_FULLSCREEN,
                                       cv2.WINDOW_FULLSCREEN)
+                force_window_topmost(LOCK_WINDOW)
                 continue
         elif has_known:
             # Reset seulement si un visage connu est confirmé
@@ -695,6 +787,16 @@ def main():
         prev_time = now
 
         draw_hud(frame, face_count, known_count, unknown_count, fps, mode, db.count())
+
+        # ── Indicateur sécurité visuel ──
+        if should_lock and unknown_since > 0:
+            remaining = max(0, LOCK_DELAY - (time.time() - unknown_since))
+            sec_text = f"ALERTE: Inconnu detecte ({remaining:.1f}s)"
+            cv2.putText(frame, sec_text, (15, fh - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        elif has_known:
+            cv2.putText(frame, "Securite: OK", (15, fh - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         if mode == "registration" and reg_step:
             draw_registration_prompt(frame, reg_step, reg_name)
@@ -770,10 +872,18 @@ def main():
     face_detector.close()
     identifier.stop()
     input_monitor.stop()
+    shell_blocker.stop()
     cap.release()
     cv2.destroyAllWindows()
     print("\n[INFO] Terminé.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n[ERREUR FATALE] {e}")
+        # Toujours relancer explorer en cas de crash
+        import subprocess
+        subprocess.Popen(["explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[INFO] Explorer relancé (sécurité).")
