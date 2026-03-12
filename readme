@@ -1,55 +1,59 @@
-# Face Detection — Détection de visages en temps réel
+# Face Detection & Recognition + Security Lock
 
-Algorithme de détection de visages en temps réel via webcam avec filtres visuels et compteur de personnes.
+Système de détection et reconnaissance faciale en temps réel avec verrouillage automatique de sécurité.
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.8%2B-green)
+![face_recognition](https://img.shields.io/badge/face__recognition-1.3%2B-orange)
 
 ---
 
 ## Fonctionnalités
 
-- Détection multi-visages en temps réel via webcam
-- Compteur de personnes détectées affiché à l'écran
-- 5 filtres visuels applicables sur les visages :
-  - **Pixelisé** — Effet mosaïque
-  - **Overlay Couleur** — Teinte semi-transparente
-  - **Contours Néon** — Détection de bords stylisée
-  - **Flou Gaussien** — Anonymisation par flou
-  - **Cartoon** — Effet dessin animé
-- Cadres stylisés numérotés autour de chaque visage
-- HUD avec FPS, filtre actif et nombre de détections
-- Sensibilité de détection ajustable en temps réel
+- Détection multi-visages en temps réel (Haar Cascade)
+- Reconnaissance faciale avec base de données locale (face_recognition)
+- Deux catégories : **Connu** (vert) / **Inconnu** (rouge)
+- **Verrouillage automatique** si une personne inconnue touche le clavier ou la souris
+- **Déverrouillage** par visage autorisé ou mot de passe
+- Écran de verrouillage plein écran avec flux caméra intégré
+- Enregistrement / suppression de personnes en direct
+- HUD avec FPS, compteurs et statistiques
+
+---
+
+## Sécurité
+
+Le système surveille en permanence le clavier et la souris. Si **uniquement** des visages inconnus sont détectés et qu'une activité clavier/souris est détectée, l'écran se verrouille automatiquement.
+
+**Déverrouillage possible par :**
+1. Présenter un visage enregistré devant la caméra
+2. Taper le mot de passe configuré au premier lancement
 
 ---
 
 ## Prérequis
 
-- Python 3.8 ou supérieur
+- Python 3.10
 - Une webcam fonctionnelle
-- pip
+- CMake installé ([cmake.org](https://cmake.org/download/))
 
 ---
 
 ## Installation
 
 ```bash
-# Cloner le projet
 git clone <url-du-repo>
 cd face-detection
 
-# Créer un environnement virtuel
 python -m venv .venv
 
-# Activer le venv
-# Windows (PowerShell/CMD)
+# Windows
 .venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
 
-# Installer les dépendances
 pip install -r requirements.txt
 ```
+
+> **Note :** numpy est fixé à 1.26.4 pour compatibilité avec dlib.
 
 ---
 
@@ -59,27 +63,31 @@ pip install -r requirements.txt
 python face_detection.py
 ```
 
+Au premier lancement, le programme demande de configurer un mot de passe de déverrouillage.
+
 ### Contrôles clavier
 
-| Touche    | Action                                    |
-|-----------|-------------------------------------------|
-| `F`       | Changer de filtre                         |
-| `+`       | Réduire la sensibilité (moins de faux positifs) |
-| `-`       | Augmenter la sensibilité (plus de détections)   |
-| `Q` / `ESC` | Quitter                                |
+| Touche      | Action                             |
+|-------------|-------------------------------------|
+| `R`         | Enregistrer un nouveau visage       |
+| `L`         | Lister les personnes enregistrées   |
+| `D`         | Supprimer une personne              |
+| `P`         | Changer le mot de passe             |
+| `Q` / `ESC` | Quitter                            |
 
----
+### Enregistrer un visage
 
-## Utilisation sous WSL
+1. Appuyez sur `R`
+2. Tapez le nom dans le terminal
+3. Regardez la caméra
+4. Appuyez sur `ESPACE` pour capturer
 
-WSL n'a pas accès direct à la webcam. Pour lancer le script depuis un terminal WSL, utilisez le Python Windows :
+### Utilisation sous WSL
 
 ```bash
-pip.exe install opencv-python numpy
+pip.exe install -r requirements.txt
 python.exe face_detection.py
 ```
-
-> Le suffixe `.exe` force WSL à exécuter le binaire Windows, qui a accès à la webcam.
 
 ---
 
@@ -88,7 +96,9 @@ python.exe face_detection.py
 ```
 face-detection/
 ├── face_detection.py    # Script principal
-├── requirements.txt     # Dépendances Python
+├── database.py          # Module base de données + mot de passe
+├── face_database.json   # DB des visages (auto-généré)
+├── requirements.txt     # Dépendances
 └── README.md
 ```
 
@@ -96,21 +106,13 @@ face-detection/
 
 ## Technologies
 
-- **OpenCV** — Capture vidéo et traitement d'image
-- **Haar Cascade** — Classifieur de détection de visages (inclus dans OpenCV)
-- **NumPy** — Manipulation de matrices d'images
-
----
-
-## Améliorations futures
-
-- Intégration d'une base de données pour la reconnaissance d'identité
-- Migration vers un modèle DNN (Deep Neural Network) pour une détection plus précise
-- Ajout de filtres supplémentaires (lunettes, masques, etc.)
-- Enregistrement vidéo des sessions de détection
+- **OpenCV** — Capture vidéo, Haar Cascade, affichage
+- **face_recognition / dlib** — Encodage et reconnaissance faciale
+- **pynput** — Surveillance clavier et souris
+- **NumPy** — Manipulation de matrices
 
 ---
 
 ## Licence
 
-Ce projet est sous licence MIT. Libre d'utilisation, de modification et de distribution.
+MIT
